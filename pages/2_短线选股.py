@@ -15,6 +15,8 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from src import screener  # noqa: E402
+from src import deepseek_analyst  # noqa: E402
+from src.config import config  # noqa: E402
 
 st.set_page_config(page_title="短线选股", page_icon="⚡", layout="wide")
 
@@ -29,6 +31,15 @@ with st.sidebar:
     st.markdown("---")
     run_btn = st.button("🚀 开始选股", type="primary", use_container_width=True)
     st.caption("数据来自 AKShare 实时接口；全市场扫描较慢请耐心等待。")
+
+    st.markdown("---")
+    st.subheader("🧠 LLM 精析")
+    _cfg = config.summary()
+    st.write(f"- 服务商：{_cfg['服务商']}")
+    st.write(f"- 模型：{_cfg['模型名称']}")
+    st.write(f"- 模式：{_cfg['运行模式']}")
+    if config.is_mock_mode():
+        st.caption("当前为 Mock，精析为占位。填 DEEPSEEK_API_KEY 并设 MOCK_MODE=false 即用真 DeepSeek。")
 
 st.warning(
     "⚠️ 数据来自 AKShare 实时接口，受网络与接口稳定性影响可能不完整；"
@@ -98,6 +109,12 @@ else:
     } for c in cands])
     st.dataframe(overview, use_container_width=True, hide_index=True)
 
+    # DeepSeek 精析（对硬规则筛出的候选做 LLM 二次研判）
+    if st.button("🧠 DeepSeek 精析（对以上候选逐只二次研判）"):
+        with st.spinner("LLM 精析中…（真实模式下在调用 DeepSeek）"):
+            st.session_state["ds_analysis"] = deepseek_analyst.analyze_candidates(cands, env)
+    analyses = st.session_state.get("ds_analysis", {})
+
     for i, c in enumerate(cands, 1):
         with st.container(border=True):
             st.subheader(f"{i}）{c['code']} {c['name']}　现价 {c['price']}")
@@ -112,6 +129,9 @@ else:
                 f"- **加仓条件**：{c['add_condition']}\n"
                 f"- **基本面**：{c['fund_status']}　｜　流通市值 {c['float_cap_yi']} 亿"
             )
+            if analyses.get(c["code"]):
+                st.markdown("**🧠 DeepSeek 精析：**")
+                st.markdown(analyses[c["code"]])
 
 # ---------------------------------------------------------------------------
 # 三、最终结论

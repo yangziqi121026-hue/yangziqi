@@ -43,18 +43,37 @@ TradingAgents 是一个基于「多智能体协作」的金融分析框架。系
 pip install -r requirements.txt
 ```
 
-## 六、环境变量配置
+## 六、环境变量配置 / 接入 DeepSeek（两套方案）
 
-复制 `.env.example` 为 `.env` 并按需填写：
+复制 `.env.example` 为 `.env`。DeepSeek 提供 OpenAI 兼容接口，已原生支持。
+
+### 方案一：零代码小白版（推荐，最省事）
+只改两行，**不用写任何代码**：
 
 ```env
-OPENAI_API_KEY=          # 你的 Key；留空则自动使用 Mock 模式
-OPENAI_BASE_URL=https://api.openai.com/v1   # 可指向任意 OpenAI 兼容服务
-MODEL_NAME=gpt-4o-mini
-MOCK_MODE=true           # true=强制占位输出；改为 false 且填了 Key 才会调用真实模型
+DEEPSEEK_API_KEY=sk-你的DeepSeekKey
+MOCK_MODE=false
 ```
 
-> API Key 全部从环境变量读取，不会写死在代码中。
+保存后 `streamlit run app.py` 即可。系统会**自动**把接口指向
+`https://api.deepseek.com`、模型用 `deepseek-chat`——全程无需改 BASE_URL/MODEL。
+DeepSeek Key 在 https://platform.deepseek.com 申请。
+
+### 方案二：专业自定义版（任意 OpenAI 兼容服务）
+需要自定义服务商/模型时填这组（`OPENAI_API_KEY` 优先级高于 DeepSeek）：
+
+```env
+OPENAI_API_KEY=你的Key
+OPENAI_BASE_URL=https://api.deepseek.com   # 或 OpenAI / 其它兼容服务
+MODEL_NAME=deepseek-reasoner               # 更强推理；deepseek-chat 更快更省
+MOCK_MODE=false
+```
+
+> - `MOCK_MODE=true` 或没填任何 Key → 全程占位输出，系统照常跑通。
+> - 配好后：① 个股「智能体过程」会用 DeepSeek 真分析；② **短线选股页**多出
+>   「🧠 DeepSeek 精析」按钮，对筛出的 RSI/超卖候选逐只做二次研判（确认/否决逻辑、
+>   RSI+MACD 点评、反面风险、价位微调、置信度）。
+> - API Key 全部从环境变量读取，不会写死在代码中，`.env` 已被 `.gitignore` 排除。
 
 ## 七、启动命令
 
