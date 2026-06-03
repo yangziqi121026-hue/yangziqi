@@ -75,6 +75,12 @@ def _build_cfg():
     st.write(f"- 模式：{_cfg['运行模式']}")
     if config.is_mock_mode():
         st.caption("当前为 Mock，精析为占位。填 DEEPSEEK_API_KEY 并设 MOCK_MODE=false 即用真 DeepSeek。")
+    if st.button("🔌 测试 DeepSeek 连接", use_container_width=True):
+        with st.spinner("正在 ping DeepSeek…"):
+            res = deepseek_analyst.test_connection()
+        (st.success if res["ok"] else st.warning)(
+            f"[{res['provider']}/{res['model']}] {res['message']}"
+        )
 
 st.warning(
     "⚠️ 数据来自 AKShare 实时接口，受网络与接口稳定性影响可能不完整；"

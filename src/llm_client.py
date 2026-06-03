@@ -33,6 +33,38 @@ class LLMClient:
                 self.mock_mode = True
                 self._client = None
 
+    def test_connection(self) -> dict:
+        """真实 ping 一次 LLM 接口，返回连接结果（用于界面"测试连接"）。"""
+        if self.mock_mode or self._client is None:
+            return {
+                "ok": False,
+                "provider": config.PROVIDER,
+                "model": self.model,
+                "message": "当前为 Mock 模式（无 Key 或 MOCK_MODE=true），未真实连接。"
+                           "请在 .env 填 DEEPSEEK_API_KEY 并将 MOCK_MODE 设为 false 后重启。",
+            }
+        try:
+            resp = self._client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": "ping，只回复两个字：OK"}],
+                max_tokens=8,
+                temperature=0,
+            )
+            txt = (resp.choices[0].message.content or "").strip()
+            return {
+                "ok": True,
+                "provider": config.PROVIDER,
+                "model": self.model,
+                "message": f"连接成功 ✅ 模型返回：{txt[:50]}",
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "provider": config.PROVIDER,
+                "model": self.model,
+                "message": f"连接失败 ❌ {exc}",
+            }
+
     def chat(
         self,
         system_prompt: str,

@@ -71,3 +71,8 @@ def analyze_candidates(candidates: List[Dict], market_env: Dict) -> Dict[str, st
 def is_real_llm() -> bool:
     """当前是否使用真实 LLM（非 mock）。供界面提示。"""
     return not getattr(llm_client, "mock_mode", True)
+
+
+def test_connection() -> dict:
+    """测试 DeepSeek/LLM API 连接，返回 {ok, provider, model, message}。"""
+    return llm_client.test_connection()
