@@ -12,6 +12,10 @@ env/
 # Runtime artifacts
 data/*.db
 reports/*.md
+reports/*.xlsx
+
+# 一次性本地工具脚本（不入库）
+/tools_build_diag_xlsx.py
 
 # IDE / OS
 .idea/

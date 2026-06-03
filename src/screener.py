@@ -14,6 +14,7 @@
 避免对全市场逐只拉历史导致卡死。所有网络调用均异常兜底。
 """
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Callable, Dict, List, Optional
 
@@ -29,6 +30,40 @@ except Exception:  # noqa: BLE001
     pass
 
 _provider = AShareProvider()
+
+
+@dataclass
+class ScreenConfig:
+    """短线选股阈值（默认 = RSI/超卖短线标准，可在界面逐项调整）。"""
+
+    # —— 技术面 ——
+    rsi_min: float = 20.0
+    rsi_max: float = 45.0                 # 超卖或中性，不追高
+    require_macd_reversal: bool = True    # MACD 绿柱缩短或刚翻红
+    require_above_ma5: bool = True        # 现价站上 MA5
+    require_above_ma10: bool = True       # 现价站上 MA10
+    require_above_ma20: bool = False      # 进阶：也站上 MA20 → 规避空头排列（默认关，建议开）
+    dist52_low_min_pct: float = 8.0       # 距52周低 ≥8%（安全垫下限）
+    # 新增修正：距52周低 上限。教训——拉普拉斯+70%/淳中+254% 均满足≥8% 却是高位崩跌，
+    # 安全垫失真。设上限剔除“远离低点的高位股”，让“低吸”名副其实。
+    dist52_low_max_pct: float = 120.0
+    chg20_min_pct: float = -5.0           # 近20日涨幅下限（止跌企稳）
+    chg20_max_pct: float = 5.0            # 近20日涨幅上限（不追高）
+
+    # —— 资金 / 活跃 ——
+    vol_ratio_min: float = 1.3            # 量比 > 1.3
+    turnover_min: float = 3.0
+    turnover_max: float = 15.0
+    min_amount_wan: float = 5000.0        # 日均成交额 > 5000 万（流动性）
+    day_chg_max_pct: float = 9.0          # 粗筛排除当日涨停/连板接力
+
+    # —— 基本面 ——
+    require_q1_profit_positive: bool = True
+    float_cap_min_yi: float = 50.0
+    float_cap_max_yi: float = 300.0
+
+    # —— 风控 ——
+    min_rr: float = 1.5                   # 盈亏比 ≥1.5 才入选
 
 # 热点题材关键词（用于 name 粗匹配加权；题材最终需人工确认）
 HOT_THEME_KEYWORDS = {
@@ -120,7 +155,7 @@ def get_market_env(spot_df: Optional[pd.DataFrame] = None) -> Dict:
 # ----------------------------------------------------------------------------
 # 粗筛（全市场快照）
 # ----------------------------------------------------------------------------
-def _coarse_filter(spot_df: pd.DataFrame, deep_limit: int) -> pd.DataFrame:
+def _coarse_filter(spot_df: pd.DataFrame, cfg: "ScreenConfig", deep_limit: int) -> pd.DataFrame:
     """基于快照字段做粗筛，返回进入深筛的候选（已限量）。"""
     df = spot_df.copy()
 
@@ -143,16 +178,16 @@ def _coarse_filter(spot_df: pd.DataFrame, deep_limit: int) -> pd.DataFrame:
     mask = pd.Series(True, index=df.index)
     # 剔除 ST / 退市
     mask &= ~df[name_col].astype(str).str.contains("ST|退", case=False, na=False)
-    # 流动性：日均成交额 > 5000 万（用当日成交额近似）
-    mask &= df["_amount"] > 5000 * 10000
-    # 换手 3%–15%
-    mask &= (df["_turnover"] >= 3) & (df["_turnover"] <= 15)
-    # 流通市值 50–300 亿
-    mask &= (df["_float_cap"] >= 50 * 1e8) & (df["_float_cap"] <= 300 * 1e8)
-    # 资金活跃（量比>1.3）—— 主力净流入在深筛阶段补充判断
-    mask &= df["_vol_ratio"] > 1.3
-    # 近20日涨幅在深筛算，这里先用当日涨幅排除明显涨停/连板（>9%）
-    mask &= df["_chg"] < 9
+    # 流动性：日均成交额 > 阈值（用当日成交额近似）
+    mask &= df["_amount"] > cfg.min_amount_wan * 10000
+    # 换手区间
+    mask &= (df["_turnover"] >= cfg.turnover_min) & (df["_turnover"] <= cfg.turnover_max)
+    # 流通市值区间
+    mask &= (df["_float_cap"] >= cfg.float_cap_min_yi * 1e8) & (df["_float_cap"] <= cfg.float_cap_max_yi * 1e8)
+    # 资金活跃（量比）—— 主力净流入在深筛阶段补充判断
+    mask &= df["_vol_ratio"] > cfg.vol_ratio_min
+    # 近20日涨幅在深筛算，这里先用当日涨幅排除明显涨停/连板
+    mask &= df["_chg"] < cfg.day_chg_max_pct
 
     out = df[mask].copy()
     # 排序：量比优先（活跃但不极端），取前 deep_limit 进深筛
@@ -192,7 +227,8 @@ def _fetch_q1_profit(date: str = "20260331") -> Dict[str, dict]:
 # ----------------------------------------------------------------------------
 def _deep_check(code: str, name: str, spot_price: float, vol_ratio: float,
                 turnover: float, float_cap: float,
-                q1: Dict[str, dict], start: str, end: str) -> Optional[dict]:
+                q1: Dict[str, dict], start: str, end: str,
+                cfg: "ScreenConfig") -> Optional[dict]:
     """对单只票拉历史算指标并应用硬性条件，通过则返回候选 dict。"""
     df = _provider.get_history(code, start, end, "daily", "qfq")
     if df is None or df.empty or len(df) < 30:
@@ -208,14 +244,22 @@ def _deep_check(code: str, name: str, spot_price: float, vol_ratio: float,
     if None in (ma5, ma10, rsi, chg20, low52):
         return None
 
-    # 技术硬性条件
-    if not (20 <= rsi <= 45):
+    # 技术硬性条件（全部来自 cfg，可调）
+    if not (cfg.rsi_min <= rsi <= cfg.rsi_max):
         return None
-    if not (price >= ma5 and price >= ma10):
+    if cfg.require_above_ma5 and price < ma5:
         return None
-    if low52 <= 0 or (price - low52) / low52 < 0.08:
+    if cfg.require_above_ma10 and price < ma10:
         return None
-    if not (-5 <= chg20 <= 5):
+    if cfg.require_above_ma20 and (ma20 is None or price < ma20):
+        return None
+    # 距52周低：下限(安全垫) + 上限(剔除高位崩跌的假安全垫)
+    if low52 <= 0:
+        return None
+    dist = (price - low52) / low52 * 100
+    if dist < cfg.dist52_low_min_pct or dist > cfg.dist52_low_max_pct:
+        return None
+    if not (cfg.chg20_min_pct <= chg20 <= cfg.chg20_max_pct):
         return None
 
     # MACD：绿柱缩短 或 刚翻红
@@ -225,14 +269,14 @@ def _deep_check(code: str, name: str, spot_price: float, vol_ratio: float,
     h1, h0 = float(hist.iloc[-1]), float(hist.iloc[-2])
     just_red = h1 > 0 and h0 <= 0
     green_shrink = h1 < 0 and h1 > h0
-    if not (just_red or green_shrink):
+    if cfg.require_macd_reversal and not (just_red or green_shrink):
         return None
 
-    # 基本面：流通市值 50–300 亿（粗筛已过，复核）+ Q1 净利润>0
+    # 基本面：流通市值（粗筛已过，复核）+ Q1 净利润>0
     fund = q1.get(code, {})
     net_profit = fund.get("net_profit")
     cfps = fund.get("cfps")
-    if net_profit is not None and net_profit <= 0:
+    if cfg.require_q1_profit_positive and net_profit is not None and net_profit <= 0:
         return None
     if cfps is not None and cfps < 0:
         return None
@@ -257,7 +301,7 @@ def _deep_check(code: str, name: str, spot_price: float, vol_ratio: float,
     if risk <= 0:
         return None
     rr = round(reward / risk, 2)
-    if rr < 1.5:
+    if rr < cfg.min_rr:
         return None
 
     # 仓位 & 加仓
@@ -298,14 +342,18 @@ def _deep_check(code: str, name: str, spot_price: float, vol_ratio: float,
 # 主入口
 # ----------------------------------------------------------------------------
 def run_screen(deep_limit: int = 40, top_n: int = 5,
+               cfg: Optional["ScreenConfig"] = None,
                progress_callback: Optional[Callable[[str, float], None]] = None) -> Dict:
     """执行完整选股流程，返回 {market_env, candidates, meta}。"""
+    cfg = cfg or ScreenConfig()
+
     def report(msg, frac):
         if progress_callback:
             progress_callback(msg, frac)
 
     meta = {"data_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "universe": 0, "coarse": 0, "deep_checked": 0, "errors": []}
+            "universe": 0, "coarse": 0, "deep_checked": 0, "errors": [],
+            "config": cfg.__dict__.copy()}
 
     # 1) 全市场快照（带重试，弱网下提升成功率）
     report("拉取全市场快照…", 0.05)
@@ -332,7 +380,7 @@ def run_screen(deep_limit: int = 40, top_n: int = 5,
 
     # 3) 粗筛
     report("粗筛（市值/换手/量比/流动性）…", 0.2)
-    coarse = _coarse_filter(spot_df, deep_limit)
+    coarse = _coarse_filter(spot_df, cfg, deep_limit)
     meta["coarse"] = len(coarse)
 
     # 4) Q1 业绩（一次性）
@@ -354,7 +402,7 @@ def run_screen(deep_limit: int = 40, top_n: int = 5,
                 code, name,
                 _to_float(row.get("_price")), _to_float(row.get("_vol_ratio")),
                 _to_float(row.get("_turnover")), _to_float(row.get("_float_cap")),
-                q1, start, end,
+                q1, start, end, cfg,
             )
             if c:
                 candidates.append(c)

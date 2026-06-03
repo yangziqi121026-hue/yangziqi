@@ -28,9 +28,44 @@ with st.sidebar:
     deep_limit = st.slider("深筛数量上限", 10, 80, 40, step=5,
                            help="粗筛后进入深度技术筛选的股票数，越大越慢")
     top_n = st.slider("最多输出候选", 1, 8, 5)
+
+    with st.expander("🎚️ 筛选阈值（默认=超卖短线标准）", expanded=False):
+        d = screener.ScreenConfig()  # 默认值
+        rsi_band = st.slider("RSI14 区间", 0, 100, (int(d.rsi_min), int(d.rsi_max)),
+                             help="超卖/中性区，不追高")
+        chg20_band = st.slider("近20日涨幅区间(%)", -30, 30,
+                               (int(d.chg20_min_pct), int(d.chg20_max_pct)))
+        dist52_band = st.slider("距52周低区间(%)", 0, 400,
+                                (int(d.dist52_low_min_pct), int(d.dist52_low_max_pct)),
+                                help="下限=安全垫；上限=剔除高位崩跌的假安全垫（本次新增修正）")
+        turn_band = st.slider("换手率区间(%)", 0, 30, (int(d.turnover_min), int(d.turnover_max)))
+        volr = st.slider("最小量比", 0.5, 5.0, float(d.vol_ratio_min), step=0.1)
+        cap_band = st.slider("流通市值区间(亿)", 0, 800,
+                             (int(d.float_cap_min_yi), int(d.float_cap_max_yi)))
+        rr_min = st.slider("最小盈亏比", 1.0, 4.0, float(d.min_rr), step=0.1)
+        col_a, col_b = st.columns(2)
+        macd_rev = col_a.checkbox("MACD反转", value=d.require_macd_reversal,
+                                  help="绿柱缩短或刚翻红")
+        q1_pos = col_b.checkbox("Q1净利>0", value=d.require_q1_profit_positive)
+        above_ma20 = st.checkbox("现价须站上MA20（规避空头排列，更严）",
+                                 value=d.require_above_ma20)
+
     st.markdown("---")
     run_btn = st.button("🚀 开始选股", type="primary", use_container_width=True)
     st.caption("数据来自 AKShare 实时接口；全市场扫描较慢请耐心等待。")
+
+
+def _build_cfg():
+    return screener.ScreenConfig(
+        rsi_min=rsi_band[0], rsi_max=rsi_band[1],
+        chg20_min_pct=chg20_band[0], chg20_max_pct=chg20_band[1],
+        dist52_low_min_pct=dist52_band[0], dist52_low_max_pct=dist52_band[1],
+        turnover_min=turn_band[0], turnover_max=turn_band[1],
+        vol_ratio_min=volr,
+        float_cap_min_yi=cap_band[0], float_cap_max_yi=cap_band[1],
+        min_rr=rr_min, require_macd_reversal=macd_rev,
+        require_q1_profit_positive=q1_pos, require_above_ma20=above_ma20,
+    )
 
     st.markdown("---")
     st.subheader("🧠 LLM 精析")
@@ -54,7 +89,8 @@ if run_btn:
         prog.progress(min(max(frac, 0.0), 1.0), text=msg)
 
     try:
-        result = screener.run_screen(deep_limit=deep_limit, top_n=top_n, progress_callback=cb)
+        result = screener.run_screen(deep_limit=deep_limit, top_n=top_n,
+                                     cfg=_build_cfg(), progress_callback=cb)
         st.session_state["screen_result"] = result
     except Exception as exc:  # noqa: BLE001
         st.error(f"选股过程出错：{exc}")
