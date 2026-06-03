@@ -54,19 +54,6 @@ with st.sidebar:
     run_btn = st.button("🚀 开始选股", type="primary", use_container_width=True)
     st.caption("数据来自 AKShare 实时接口；全市场扫描较慢请耐心等待。")
 
-
-def _build_cfg():
-    return screener.ScreenConfig(
-        rsi_min=rsi_band[0], rsi_max=rsi_band[1],
-        chg20_min_pct=chg20_band[0], chg20_max_pct=chg20_band[1],
-        dist52_low_min_pct=dist52_band[0], dist52_low_max_pct=dist52_band[1],
-        turnover_min=turn_band[0], turnover_max=turn_band[1],
-        vol_ratio_min=volr,
-        float_cap_min_yi=cap_band[0], float_cap_max_yi=cap_band[1],
-        min_rr=rr_min, require_macd_reversal=macd_rev,
-        require_q1_profit_positive=q1_pos, require_above_ma20=above_ma20,
-    )
-
     st.markdown("---")
     st.subheader("🧠 LLM 精析")
     _cfg = config.summary()
@@ -81,6 +68,19 @@ def _build_cfg():
         (st.success if res["ok"] else st.warning)(
             f"[{res['provider']}/{res['model']}] {res['message']}"
         )
+
+
+def _build_cfg():
+    return screener.ScreenConfig(
+        rsi_min=rsi_band[0], rsi_max=rsi_band[1],
+        chg20_min_pct=chg20_band[0], chg20_max_pct=chg20_band[1],
+        dist52_low_min_pct=dist52_band[0], dist52_low_max_pct=dist52_band[1],
+        turnover_min=turn_band[0], turnover_max=turn_band[1],
+        vol_ratio_min=volr,
+        float_cap_min_yi=cap_band[0], float_cap_max_yi=cap_band[1],
+        min_rr=rr_min, require_macd_reversal=macd_rev,
+        require_q1_profit_positive=q1_pos, require_above_ma20=above_ma20,
+    )
 
 st.warning(
     "⚠️ 数据来自 AKShare 实时接口，受网络与接口稳定性影响可能不完整；"
