@@ -24,13 +24,21 @@ SYSTEM_PROMPT = (
 
 def _build_prompt(c: Dict, market_env: Dict) -> str:
     """把单只候选的量化数据组织成给 LLM 的精析提示。"""
+    price = c.get("price")
+
+    def _pos(ma):
+        if price is None or ma is None:
+            return "?"
+        return "站上" if price >= ma else "跌破"
+
+    ma_pos = f"现价{_pos(c.get('ma5'))}MA5、{_pos(c.get('ma10'))}MA10、{_pos(c.get('ma20'))}MA20"
     return (
         f"【大盘环境】趋势：{market_env.get('trend')}；量能：{market_env.get('volume')}；"
         f"情绪：{market_env.get('sentiment')}；建议总仓位：{market_env.get('suggested_position')}\n\n"
         f"【候选标的】{c.get('code')} {c.get('name')}　现价 {c.get('price')}\n"
         f"- RSI14：{c.get('rsi')}（{'超卖' if (c.get('rsi') or 50) < 30 else '中性区'}）\n"
         f"- MACD：{c.get('macd_state')}\n"
-        f"- 均线：MA5={c.get('ma5')} MA10={c.get('ma10')} MA20={c.get('ma20')}（现价已站上MA5/MA10）\n"
+        f"- 均线：MA5={c.get('ma5')} MA10={c.get('ma10')} MA20={c.get('ma20')} MA60={c.get('ma60')}（{ma_pos}）\n"
         f"- 距52周低：{c.get('dist_52w_low_pct')}%　近20日涨幅：{c.get('chg20')}%\n"
         f"- 量比：{c.get('vol_ratio')}　换手：{c.get('turnover')}%　流通市值：{c.get('float_cap_yi')}亿\n"
         f"- 题材：{c.get('theme')}　基本面：{c.get('fund_status')}\n"
