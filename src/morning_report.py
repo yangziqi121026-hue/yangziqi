@@ -27,13 +27,21 @@ _NEWS_KW = ["CPI", "通胀", "美股", "纳指", "道指", "标普", "降息", "
             "芯片", "光刻", "算力", "光模块", "硅光", "稀土", "减持", "解禁", "业绩",
             "工信部", "英伟达", "出口管制", "6G", "光伏", "AI"]
 
+# 外国/海外/地缘 专栏关键词
+_FOREIGN_KW = ["美国", "美股", "纳指", "道指", "标普", "美联储", "降息", "加息", "CPI",
+               "PCE", "非农", "美债", "美元", "鲍威尔", "特朗普", "英伟达", "甲骨文",
+               "台积电", "AMD", "博通", "苹果", "微软", "谷歌", "特斯拉", "OpenAI",
+               "出口管制", "关税", "欧洲", "欧央行", "日本", "日银", "韩国", "俄", "乌",
+               "伊朗", "中东", "OPEC", "原油", "黄金", "地缘", "以色列", "比特币"]
+
 
 def _us_indices() -> List[str]:
     out = []
     try:
         import akshare as ak
 
-        for nm, s in [("纳指", ".IXIC"), ("标普", ".INX"), ("道指", ".DJI")]:
+        for nm, s in [("纳指", ".IXIC"), ("标普", ".INX"), ("道指", ".DJI"),
+                      ("费城半导体SOX", ".SOX")]:
             try:
                 d = ak.index_us_stock_sina(symbol=s)
                 r = d.iloc[-1]; p = d.iloc[-2]
@@ -44,6 +52,43 @@ def _us_indices() -> List[str]:
     except Exception:  # noqa: BLE001
         out.append("- 美股指数接口不可用，需核验")
     return out
+
+
+def _us_leaders() -> List[str]:
+    """美股科技龙头（隔夜表现，直接映射A股算力/半导体情绪）。"""
+    out = []
+    try:
+        import akshare as ak
+
+        for nm, s in [("英伟达", "NVDA"), ("台积电", "TSM"), ("AMD", "AMD"),
+                      ("博通", "AVGO")]:
+            try:
+                d = ak.stock_us_daily(symbol=s)
+                r = d.iloc[-1]; p = d.iloc[-2]
+                chg = (float(r["close"]) / float(p["close"]) - 1) * 100
+                out.append(f"- {nm} {s}：{float(r['close']):.2f}（{chg:+.2f}%）")
+            except Exception:  # noqa: BLE001
+                out.append(f"- {nm} {s}：取数失败，需核验")
+    except Exception:  # noqa: BLE001
+        out.append("- 美股龙头接口不可用，需核验")
+    return out
+
+
+def _foreign_news(limit: int = 8) -> List[str]:
+    """海外/外围/地缘 新闻专栏（从东财快讯按外国关键词过滤）。"""
+    try:
+        import akshare as ak
+
+        df = ak.stock_info_global_em().rename(columns={"标题": "t", "发布时间": "tm"})
+        hits = []
+        for _, x in df.iterrows():
+            if any(k in str(x["t"]) for k in _FOREIGN_KW):
+                hits.append(f"- [{str(x['tm'])[:16]}] {str(x['t'])[:60]}")
+            if len(hits) >= limit:
+                break
+        return hits or ["- 暂无命中海外关键词的快讯，需核验"]
+    except Exception as exc:  # noqa: BLE001
+        return [f"- 海外快讯获取失败：{exc}"]
 
 
 def _news(limit: int = 12) -> List[str]:
@@ -67,15 +112,22 @@ def generate(save: bool = True) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines = [f"# A股盘前报告 {now}", ""]
 
-    lines.append("## 一、隔夜美股")
+    lines.append("## 一、隔夜美股（指数 + 科技龙头 + 费城半导体）")
     lines += _us_indices()
     lines.append("")
+    lines.append("**美股科技龙头（直接映射A股算力/半导体情绪）：**")
+    lines += _us_leaders()
+    lines.append("")
 
-    lines.append("## 二、隔夜/盘前财经快讯（外围/科技/政策/减持）")
+    lines.append("## 二、外国/海外·地缘新闻雷达")
+    lines += _foreign_news()
+    lines.append("")
+
+    lines.append("## 三、隔夜/盘前财经快讯（外围/科技/政策/减持）")
     lines += _news()
     lines.append("")
 
-    lines.append("## 三、A股分层观察池（技术清单 + 信号）")
+    lines.append("## 四、A股分层观察池（技术清单 + 信号）")
     try:
         res = daily_watch.scan_watchlist()
         m = res["meta"]
@@ -102,7 +154,7 @@ def generate(save: bool = True) -> str:
         lines.append(f"A股扫描失败：{exc}")
 
     lines.append("> 规则：量比>1.3才算放量、站MA5/MA10、破MA5止损、市值20-500亿（超出降级）。")
-    lines.append("> 资金面（主力/北向）未取到、降权；美债/美元/SOX/个股龙头等未取到处需核验。")
+    lines.append("> 资金面（主力/北向）未取到、降权；美债/美元未取到处需核验（标注「需核验」处同理）。")
     lines.append("> 本报告由自动任务生成，仅供研究，不构成投资建议；所有买点配破 MA5 硬止损。")
 
     report = "\n".join(lines)
