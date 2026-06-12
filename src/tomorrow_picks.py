@@ -19,7 +19,7 @@ from typing import Dict, List
 
 import pandas as pd
 
-from . import daily_watch, sector_screener, stock_deepdive
+from . import daily_watch, review_log, sector_screener, stock_deepdive
 
 try:
     pd.set_option("future.infer_string", False)
@@ -92,11 +92,25 @@ def _eligible(r: Dict) -> bool:
     )
 
 
+def _confirmed(r: Dict) -> bool:
+    """量价确认 = 放量(量比>1.3) 且 站上 MA10。这是发奖牌的唯一门槛。"""
+    return (r["close"] >= r["ma10"]) and ((r.get("volr") or 0) > 1.3)
+
+
 def _score(r: Dict) -> float:
-    return _SIG_RANK.get(r["signal"], 0) * 1000 + min(r["rr"] or 0, 5) * 100 + (r["volr"] or 0) * 10
+    """纯量价排序，禁止主观题材加权：
+    ① 放量站MA10(已确认) 最高优先 → ② 站上MA10 → ③ 信号等级 → ④ RR → ⑤ 量比。
+    """
+    above10 = r["close"] >= r["ma10"]
+    return ((1_000_000 if _confirmed(r) else 0)
+            + (100_000 if above10 else 0)
+            + _SIG_RANK.get(r["signal"], 0) * 1000
+            + min(r["rr"] or 0, 5) * 100
+            + (r["volr"] or 0) * 10)
 
 
-def generate(top_n: int = 3, save: bool = True, wide: bool = True) -> str:
+def generate(top_n: int = 3, save: bool = True, wide: bool = True,
+             max_workers: int = 6) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     # 1. 外围（只拉一次）
     us = stock_deepdive._us_env()
@@ -104,16 +118,28 @@ def generate(top_n: int = 3, save: bool = True, wide: bool = True) -> str:
 
     # 2. 扫描候选池（wide=True 时并入板块池 ~100 只）
     uni = _universe(wide=wide)
-    rows, fails = _scan_universe(uni)
+    rows, fails = _scan_universe(uni, max_workers=max_workers)
     m = {"scanned": len(rows), "total": len(uni), "fails": fails}
     # 名称映射（供深度分析用，绕过取不到的名称接口）
     name_map = {c: nm for c, (_t, nm) in uni.items()}
 
-    # 3. 排名
+    # 3. 排名（纯量价）+ 发奖牌（仅"放量站MA10已确认"者可得🥇🥈🥉，其余一律⚠️）
     cands = sorted([r for r in rows if _eligible(r)], key=_score, reverse=True)
+    mi = 0
+    for r in cands:
+        if _confirmed(r) and mi < 3:
+            r["medal"] = ["🥇", "🥈", "🥉"][mi]; mi += 1
+        else:
+            r["medal"] = "⚠️"
     defensive = [r for r in rows if r["tier"].startswith("防御")]
     watch = [r for r in rows if (not _eligible(r)) and "破位" not in r["signal"]
              and not r["tier"].startswith("防御")]
+
+    # 复盘日志：先评估历史未结记录(用今日最新数据)，再把今日候选落库
+    try:
+        review_log.evaluate()
+    except Exception:  # noqa: BLE001
+        pass
 
     env_bad = (us["nasdaq"] is not None and us["nasdaq"] <= -1.0) or \
               (us["sox"] is not None and us["sox"] <= -1.5)
@@ -139,16 +165,24 @@ def generate(top_n: int = 3, save: bool = True, wide: bool = True) -> str:
     # 一 候选排名
     fail_note = f"｜失败 {len(m['fails'])}" if m["fails"] else ""
     L.append(f"## 一、明日短线候选排名（达标 {len(cands)} 只 / 扫描 {m['scanned']}/{m['total']}{fail_note}）")
+    L.append("> 排序=纯量价（放量站MA10优先），**禁主观题材加权**；**🥇🥈🥉仅授予『放量站MA10已确认』者，未确认一律⚠️**。")
     if not cands:
-        L.append("**⚠️ 今日无一只满足四重共振门槛（站MA5+放量/回踩到位+RR≥1.5+市值合规+非超买）。**")
+        L.append("**⚠️ 今日无一只满足门槛（站MA5+放量/回踩到位+RR≥1.5+市值合规+非超买）。**")
         L.append("**纪律结论：明日无【主推】，空仓或只做防御。** 宁可错过，不碰不达标的票。")
     else:
-        L.append("| 排名 | 代码 | 名称 | 层 | 信号 | 现价 | RSI | 量比 | RR | 市值 | 入场 | 止损 | 目标 |")
-        L.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
-        for i, r in enumerate(cands, 1):
-            L.append(f"| {i} | {r['code']} | {r['name']} | {r['tier']} | {r['signal']} | {r['close']} | "
+        L.append("| 奖牌 | 代码 | 名称 | 层 | 信号 | 现价 | RSI | 量比 | RR | 市值 | 入场 | 止损 | 目标 |")
+        L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        for r in cands:
+            conf = "✅放量站MA10" if _confirmed(r) else ("站MA10未放量" if r["close"] >= r["ma10"] else "仅站MA5")
+            L.append(f"| {r['medal']} | {r['code']} | {r['name']} | {r['tier']} | {r['signal']}/{conf} | {r['close']} | "
                      f"{r['rsi']} | {r['volr']} | {r['rr']} | {r['cap']}亿 | {r['entry']} | {r['stop']} | {r['target']} |")
     L.append("")
+
+    # 落库今日候选（含防御/观察池一并记录，便于全口径复盘）
+    try:
+        review_log.log_picks(cands, tone=us["tone"])
+    except Exception:  # noqa: BLE001
+        pass
 
     # 二 Top-N 深度分析
     if cands:
@@ -183,6 +217,15 @@ def generate(top_n: int = 3, save: bool = True, wide: bool = True) -> str:
             L.append(f"- {r['code']} {r['name']}（{r['tier']}）｜收{r['close']}｜{r['signal']}｜"
                      f"量比{r['volr']}｜RR{r['rr']}｜距MA5 {round((r['close']/r['ma5']-1)*100,1)}%")
         L.append("")
+
+    # 五 复盘成绩单（用历史推荐 vs 真实走势，量化约束分析者）
+    try:
+        L.append("## 五、复盘成绩单（推荐 vs 真实走势·自动累计）")
+        L.append(review_log.scorecard_md())
+        L.append("> 口径：推荐日收盘→下一交易日收盘的方向；单独统计破止损率。胜率低/止损率高=该收敛。")
+        L.append("")
+    except Exception:  # noqa: BLE001
+        pass
 
     # 纪律
     L.append("## 纪律与仓位")

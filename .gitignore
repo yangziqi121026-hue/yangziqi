@@ -13,6 +13,7 @@ env/
 data/*.db
 reports/*.md
 reports/*.xlsx
+reports/*.jsonl
 
 # 一次性本地工具脚本（不入库；正式功能已收编进 src/sector_screener.py）
 /tools_*.py
