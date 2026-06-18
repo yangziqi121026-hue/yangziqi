@@ -124,7 +124,10 @@ def generate(top_n: int = 3, save: bool = True, wide: bool = True,
     name_map = {c: nm for c, (_t, nm) in uni.items()}
 
     # 3. 排名（纯量价）+ 发奖牌（仅"放量站MA10已确认"者可得🥇🥈🥉，其余一律⚠️）
-    cands = sorted([r for r in rows if _eligible(r)], key=_score, reverse=True)
+    # ⛔ 防御板块(电力/红利)剔除出"放量突破发奖牌"排名——它们放量常是利空/出货而非突破
+    #    (教训：粤电力A 量比2.06"放量站MA10"给🥈，次日-9.98%跌停)。防御只做回踩打底。
+    cands = sorted([r for r in rows if _eligible(r) and not r["tier"].startswith("防御")],
+                   key=_score, reverse=True)
     mi = 0
     for r in cands:
         if _confirmed(r) and mi < 3:
@@ -165,7 +168,8 @@ def generate(top_n: int = 3, save: bool = True, wide: bool = True,
     # 一 候选排名
     fail_note = f"｜失败 {len(m['fails'])}" if m["fails"] else ""
     L.append(f"## 一、明日短线候选排名（达标 {len(cands)} 只 / 扫描 {m['scanned']}/{m['total']}{fail_note}）")
-    L.append("> 排序=纯量价（放量站MA10优先），**禁主观题材加权**；**🥇🥈🥉仅授予『放量站MA10已确认』者，未确认一律⚠️**。")
+    L.append("> 排序=纯量价（放量站MA10优先），**禁主观题材加权**；**🥇🥈🥉仅授予『放量站MA10已确认』者，未确认一律⚠️**；"
+             "**防御板块(电力/红利)不参与发奖牌、只在下方做回踩打底**（其放量多为利空/出货，非突破）。")
     if not cands:
         L.append("**⚠️ 今日无一只满足门槛（站MA5+放量/回踩到位+RR≥1.5+市值合规+非超买）。**")
         L.append("**纪律结论：明日无【主推】，空仓或只做防御。** 宁可错过，不碰不达标的票。")
