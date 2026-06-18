@@ -83,13 +83,15 @@ def _us_env() -> Dict:
         best = max(vals)
         if worst <= -1.5:
             tone = "🔴 外围逆风（risk-off）"
-            tone_note = "隔夜美股/半导体明显杀跌，科技算力是被砸方向——追高风险大，优先防御、轻仓。"
+            tone_note = ("外围逆风→**只压总仓位（≤2成）**；**不据此规避任何A股板块**，"
+                         "板块方向只看A股自身量价(量比>1.3+站MA10)。（教训：拿外围猜板块方向两次都错）")
         elif best >= 1.0 and worst >= -0.3:
             tone = "🟢 外围顺风（risk-on）"
-            tone_note = "隔夜美股偏暖，科技算力有外围支撑——可顺势但仍守纪律、破位止损。"
+            tone_note = ("外围顺风→**总仓位可放宽（≤3成）**；**不据此追任何A股板块**，"
+                         "板块方向只看A股自身量价。仍守纪律、破位止损。")
         else:
             tone = "🟡 外围中性偏弱" if worst < -0.5 else "🟡 外围中性"
-            tone_note = "外围方向不明朗，别被单日消息脉冲带节奏，跟个股技术走。"
+            tone_note = "外围方向不明→总仓位居中；板块方向只看A股自身量价，别被单日消息脉冲带节奏。"
     return {"idx": idx, "leaders": leaders, "tone": tone, "tone_note": tone_note,
             "nasdaq": nasdaq, "sox": sox}
 
@@ -357,16 +359,16 @@ def analyze(code: str, name: Optional[str] = None, theme: str = "—",
               f"破 {t['low5']} 继续看低。")
     elif "破位" in t["signal"]:
         op = (f"🔴 **破位/下跌中继，不碰**：持有者反抽 MA10 {t['ma10']} 不站上就走、跌破 {t['stop']} 止损；"
-              "空仓别抄，等企稳信号。"
-              + ("外围逆风更要回避。" if env_bad else ""))
-    elif t["signal"] == "✅放量突破/多头" and (t["rr"] or 0) >= 1.5 and not env_bad and t["cap_ok"]:
+              "空仓别抄，等企稳信号。")
+    elif t["signal"] == "✅放量突破/多头" and (t["rr"] or 0) >= 1.5 and t["cap_ok"]:
+        # 外围只影响仓位，不改变"是否可关注"——逆风日把总仓降一档，但不据外围规避
         op = (f"✅ **可关注（四重共振待确认）**：站上MA5+放量+RR{t['rr']}；"
               f"入场 {t['entry']}、破 {t['stop']} 止损、目标 {t['target']}；首仓1成、总仓≤3成。"
-              + ("⚠外围非顺风，仓位再降一档。" if us["nasdaq"] is not None and us["nasdaq"] < 0 else ""))
+              + ("⚠外围非顺风→**仅总仓位降一档**（不规避本票，看其自身量价）。"
+                 if us["nasdaq"] is not None and us["nasdaq"] < 0 else ""))
     elif t["above5"]:
         rr_lo = "（RR偏低）" if (t["rr"] is not None and t["rr"] < 1.5) else ""
-        op = (f"⚪ **站上MA5但未共振，观望/极小仓**：回踩 {t['entry']} 不破再看，破 {t['stop']} 走{rr_lo}。"
-              + ("外围逆风优先等。" if env_bad else ""))
+        op = (f"⚪ **站上MA5但未共振，观望/极小仓**：回踩 {t['entry']} 不破再看，破 {t['stop']} 走{rr_lo}。")
     else:
         op = f"⚪ **跌破MA5、观望**：等回踩 MA5 {t['ma5']} 企稳站回再看，破 {t['stop']} 不看。"
     L.append(f"**操作：** {op}")
@@ -376,7 +378,7 @@ def analyze(code: str, name: Optional[str] = None, theme: str = "—",
     L.append(f"{h2} 五、风险")
     risks = []
     if env_bad:
-        risks.append("外围逆风未解（隔夜美股/半导体杀跌），题材短期无风口")
+        risks.append("外围逆风：**仅压总仓位（≤2成）**，不据此规避本票/板块——方向看A股自身量价")
     if "破位" in t["signal"]:
         risks.append(f"已破MA5/下跌中继，破 {t['stop']} 加速下行")
     if t["volr"] < 1.0:
