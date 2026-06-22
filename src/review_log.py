@@ -59,8 +59,12 @@ def log_picks(picks: List[Dict], rec_date: Optional[str] = None,
             "rec_close": p.get("close"), "entry": p.get("entry"),
             "stop": p.get("stop"), "target": p.get("target"), "rr": p.get("rr"),
             "tone": tone,
+            # 供亏损单5类错误归类的字段
+            "ds_conf": p.get("ds_conf"), "is_stale": bool(p.get("is_stale")),
+            "tier": p.get("tier"), "turn": p.get("turn"), "rsi": p.get("rsi"),
             "evaluated": False, "eval_date": None, "eval_close": None,
             "chg_pct": None, "hit_stop": None, "hit_tp1": None, "outcome": None,
+            "error_type": None,
         })
         added += 1
     _write_all(recs)
@@ -104,11 +108,44 @@ def evaluate(fetch=None) -> int:
             r["outcome"] = "对(涨)"
         else:
             r["outcome"] = "错(跌)"
+        # 亏损单(含止损)归到5类错误(启发式)
+        if not (r["outcome"] or "").startswith("对"):
+            r["error_type"] = _classify_error(r)
         r["evaluated"] = True
         changed += 1
     if changed:
         _write_all(recs)
     return changed
+
+
+def _classify_error(r: Dict) -> str:
+    """把亏损单归到5类错误(启发式，基于已存字段)：
+    ①数据错误 ②规则混用 ③风控漏判 ④题材误判 ⑤流动性踩坑。"""
+    if r.get("is_stale"):
+        return "①数据错误(用了滞后数据)"
+    if r.get("rr") is not None and r["rr"] < 1.5:
+        return "③风控漏判(RR<1.5仍推)"
+    if r.get("rsi") is not None and r["rsi"] >= 70:
+        return "③风控漏判(超买仍推)"
+    sig = r.get("signal") or ""
+    if "破位" in sig or "超卖" in sig:
+        return "③风控漏判(破位/超卖禁买区)"
+    tier = r.get("tier") or ""
+    if "超跌" in tier or "题材" in tier:
+        return "④题材误判(题材未兑现/退潮)"
+    return "④题材/择时误判(逻辑未兑现)"  # 兜底；⑤流动性需成交额数据，暂未采集
+
+
+def errors_md() -> str:
+    recs = [r for r in _read() if r.get("evaluated") and r.get("error_type")]
+    if not recs:
+        return "（暂无已归类的亏损单。）"
+    from collections import Counter
+    c = Counter(r["error_type"] for r in recs)
+    lines = [f"**亏损单错误归类（共{len(recs)}笔）：**"]
+    for et, n in c.most_common():
+        lines.append(f"- {et}：{n}笔")
+    return "\n".join(lines)
 
 
 def scorecard() -> Dict:

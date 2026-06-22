@@ -64,6 +64,23 @@ def analyze_one(candidate: Dict, market_env: Dict) -> str:
     )
 
 
+def assess_confidence(candidate: Dict, market_env: Dict) -> str:
+    """只评短线置信度，返回 高/中/低。用 temperature=0 求确定性，修单次调用 中↔低 跳变。
+    门槛专用：若解析失败按"中"处理(不误杀)。"""
+    import re
+    prompt = (
+        _build_prompt(candidate, market_env)
+        + "\n\n请只回一行：『置信度：高』或『置信度：中』或『置信度：低』，不要其它内容。"
+    )
+    try:
+        txt = llm_client.chat(system_prompt=SYSTEM_PROMPT, user_prompt=prompt,
+                              temperature=0.0, max_tokens=20, mock_role="deepseek_short")
+    except Exception:  # noqa: BLE001
+        return "中"
+    m = re.search(r"(高|中|低)", txt)
+    return m.group(1) if m else "中"
+
+
 def analyze_candidates(candidates: List[Dict], market_env: Dict) -> Dict[str, str]:
     """批量精析，返回 {code: 分析文本}。任何单只出错不影响其余。"""
     out: Dict[str, str] = {}

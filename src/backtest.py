@@ -109,6 +109,46 @@ def backtest_stock(code: str, hold: int = 5, exit_mode: str = "fixed",
     return out
 
 
+def _agg(trades: List[Tuple[str, float, bool]]) -> Dict:
+    agg: Dict[str, Dict] = {}
+    for sig, ret, hit in trades:
+        a = agg.setdefault(sig, {"rets": [], "stops": 0})
+        a["rets"].append(ret)
+        if hit:
+            a["stops"] += 1
+    out = {}
+    for sig, a in agg.items():
+        r = np.array(a["rets"])
+        out[sig] = {"n": len(r), "win_rate": round((r > 0).mean() * 100, 1),
+                    "mean": round(r.mean(), 2), "median": round(float(np.median(r)), 2),
+                    "stop_rate": round(a["stops"] / len(r) * 100, 1)}
+    return out
+
+
+def backtest_stock_split(code: str, hold: int, test_days: int):
+    """返回 (train_trades, test_trades)：近 test_days 根为样本外测试集，其余为训练集。"""
+    d = daily_watch._fetch(code, retries=2)
+    if d is None or len(d) < 120:
+        return [], []
+    allt = backtest_stock(code, hold)  # 复用(已含信号+模拟)；按 t 顺序近似切分
+    if not allt:
+        return [], []
+    cut = max(0, len(allt) - test_days)
+    return allt[:cut], allt[cut:]
+
+
+def run_split(hold: int = 5, max_workers: int = 4, test_days: int = 240) -> Dict:
+    """防过拟合分段回测：训练集(早期) vs 测试集(近 test_days≈1年样本外)。
+    若测试集期望比训练集大幅下滑 → 该信号疑似过拟合/边际衰减。"""
+    uni = _universe()
+    tr: List[Tuple[str, float, bool]] = []
+    te: List[Tuple[str, float, bool]] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        for a, b in ex.map(lambda c: backtest_stock_split(c, hold, test_days), uni):
+            tr.extend(a); te.extend(b)
+    return {"hold": hold, "test_days": test_days, "train": _agg(tr), "test": _agg(te)}
+
+
 def run(hold: int = 5, max_workers: int = 8, exit_mode: str = "fixed") -> Dict:
     uni = _universe()
     codes = list(uni.keys())

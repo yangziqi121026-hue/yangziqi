@@ -98,11 +98,9 @@ def _ds_conf_of(r: Dict, env: Dict) -> str:
         "stop": r["stop"], "target": r["target"], "rr": r["rr"],
     }
     try:
-        txt = deepseek_analyst.analyze_one(cand, env)
+        return deepseek_analyst.assess_confidence(cand, env)  # temp=0 确定性，修中↔低跳变
     except Exception:  # noqa: BLE001
         return "?"
-    m = re.search(r"5\)\s*\**\s*(高|中|低)", txt) or re.search(r"(?:置信度|信心)[：:\s\*]*(高|中|低)", txt)
-    return m.group(1) if m else "?"
 
 
 def _eligible(r: Dict) -> bool:
@@ -158,6 +156,10 @@ def generate(top_n: int = 3, save: bool = True, wide: bool = True,
     #    (教训：粤电力A 量比2.06"放量站MA10"给🥈，次日-9.98%跌停)。防御只做回踩打底。
     cands = sorted([r for r in rows if _eligible(r) and not r["tier"].startswith("防御")],
                    key=_score, reverse=True)
+    # 外围定调(供 DeepSeek 与下方报告共用，先算好避免引用未定义)
+    env_bad = (us["nasdaq"] is not None and us["nasdaq"] <= -1.0) or \
+              (us["sox"] is not None and us["sox"] <= -1.5)
+    pos_cap = "≤2成（外围逆风）" if env_bad else "≤3成"
     # 🔬 对量价靠前的候选(限前8控成本)逐只 DeepSeek，取置信度——低置信度不发奖牌(教训:鸣志🥉DeepSeek低却排前、次日破止损)
     ds_env = {"trend": us["tone"], "volume": f"纳指{stock_deepdive._fmt(us['nasdaq'])}/SOX{stock_deepdive._fmt(us['sox'])}",
               "sentiment": us["tone_note"], "suggested_position": pos_cap}
@@ -180,10 +182,6 @@ def generate(top_n: int = 3, save: bool = True, wide: bool = True,
         review_log.evaluate()
     except Exception:  # noqa: BLE001
         pass
-
-    env_bad = (us["nasdaq"] is not None and us["nasdaq"] <= -1.0) or \
-              (us["sox"] is not None and us["sox"] <= -1.5)
-    pos_cap = "≤2成（外围逆风）" if env_bad else "≤3成"
 
     L: List[str] = [f"# 明日短线候选 + 深度分析（收盘后定稿）", f"_{now}_", ""]
 
