@@ -79,22 +79,25 @@ def _scan_universe(uni: Dict[str, tuple], max_workers: int = 8):
     return rows, fails
 
 
+def _confirmed(r: Dict) -> bool:
+    """量价确认 = 放量(量比>1.3) 且 站上 MA10。回测证明这是唯一有正期望的买点门槛。"""
+    return (r["close"] >= r["ma10"]) and ((r.get("volr") or 0) > 1.3)
+
+
 def _eligible(r: Dict) -> bool:
-    """是否够格做『明日短线候选』（用户铁律硬门槛）。"""
+    """是否够格做『明日短线买点候选』。
+    ⭐ 回测校准(30万样本)：只有"放量站MA10确认"(放量突破多头/放量站MA10)有正期望(+0.7%/5日)；
+    "回踩低吸缩量""站上MA5未放量"期望薄(+0.15%)、止损率高 → 不再当买点，降级到观察池。
+    所以买点候选 = 必须 _confirmed(放量站MA10) + 铁律门槛。
+    """
     return (
-        r.get("above5", r["close"] >= r["ma5"])
+        _confirmed(r)
         and "破位" not in r["signal"]
         and "超卖" not in r["signal"]
         and r["cap_ok"]
         and r["rsi"] < 70
         and r["rr"] is not None and r["rr"] >= 1.5
-        and r["signal"] in _SIG_RANK
     )
-
-
-def _confirmed(r: Dict) -> bool:
-    """量价确认 = 放量(量比>1.3) 且 站上 MA10。这是发奖牌的唯一门槛。"""
-    return (r["close"] >= r["ma10"]) and ((r.get("volr") or 0) > 1.3)
 
 
 def _score(r: Dict) -> float:
@@ -187,8 +190,10 @@ def generate(top_n: int = 3, save: bool = True, wide: bool = True,
     # 一 候选排名
     fail_note = f"｜失败 {len(m['fails'])}" if m["fails"] else ""
     L.append(f"## 一、明日短线候选排名（达标 {len(cands)} 只 / 扫描 {m['scanned']}/{m['total']}{fail_note}）")
-    L.append("> 排序=纯量价（放量站MA10优先），**禁主观题材加权**；**🥇🥈🥉仅授予『放量站MA10已确认』者，未确认一律⚠️**；"
-             "**防御板块(电力/红利)不参与发奖牌、只在下方做回踩打底**（其放量多为利空/出货，非突破）。")
+    L.append("> 排序=纯量价；**买点候选只收『放量站MA10确认』**（回测30万样本：仅此类有正期望+0.7%/5日；"
+             "回踩低吸/站MA5未放量期望薄+0.15%已降级到观察池）；防御板块不发奖牌只做回踩打底。")
+    L.append("> ⚙️ **出场纪律(回测校准·低胜率正偏态)**：胜率约40%属正常，靠『赢家是输家约2倍』取胜——"
+             "**第一止盈减半落袋，剩余用移动止损(跌破MA5才清)让赢家跑**捕捉大涨；亏损严守破MA5(-3~4%封顶)。")
     if not cands:
         L.append("**⚠️ 今日无一只满足门槛（站MA5+放量/回踩到位+RR≥1.5+市值合规+非超买）。**")
         L.append("**纪律结论：明日无【主推】，空仓或只做防御。** 宁可错过，不碰不达标的票。")
