@@ -120,6 +120,12 @@ def generate(top_n: int = 3, save: bool = True, wide: bool = True,
     uni = _universe(wide=wide)
     rows, fails = _scan_universe(uni, max_workers=max_workers)
     m = {"scanned": len(rows), "total": len(uni), "fails": fails}
+    # 数据时效：取各票数据日期，标出最新日 + 滞后只数（新浪逐只异步更新，防止拿旧数据当最新）
+    _dates = [r.get("data_date", "") for r in rows if r.get("data_date")]
+    _latest = max(_dates) if _dates else "?"
+    _stale = [r for r in rows if r.get("data_date") and r["data_date"] < _latest]
+    for r in rows:
+        r["is_stale"] = bool(r.get("data_date") and r["data_date"] < _latest)
     # 名称映射（供深度分析用，绕过取不到的名称接口）
     name_map = {c: nm for c, (_t, nm) in uni.items()}
 
@@ -150,6 +156,19 @@ def generate(top_n: int = 3, save: bool = True, wide: bool = True,
 
     L: List[str] = [f"# 明日短线候选 + 深度分析（收盘后定稿）", f"_{now}_", ""]
 
+    # 数据时效横幅（必出）：最新数据日 + 滞后告警
+    from datetime import date as _date
+    _gap = (_date.today() - _date.fromisoformat(_latest)).days if _latest != "?" else None
+    if _latest == "?":
+        L.append("> **🕒 数据时效：未知，需核验**")
+    elif _gap is not None and _gap <= 0 and not _stale:
+        L.append(f"> **🕒 数据时效：✅ 全部 {_latest}（当日最新）**")
+    else:
+        L.append(f"> **🕒 数据时效：最新数据日 {_latest}"
+                 + (f"（距今{_gap}天）" if _gap else "")
+                 + f"；其中 {len(_stale)} 只新浪源仍未更新到该日（已标⚠️旧，按旧数据看、决策打折）**" )
+    L.append("")
+
     # 〇 外围（一次）
     L.append("## 〇、外围环境（隔夜美股 + 美国新闻）")
     L.append(f"**定调：{us['tone']}** — {us['tone_note']}　**今日建议总仓位上限：{pos_cap}**")
@@ -174,11 +193,12 @@ def generate(top_n: int = 3, save: bool = True, wide: bool = True,
         L.append("**⚠️ 今日无一只满足门槛（站MA5+放量/回踩到位+RR≥1.5+市值合规+非超买）。**")
         L.append("**纪律结论：明日无【主推】，空仓或只做防御。** 宁可错过，不碰不达标的票。")
     else:
-        L.append("| 奖牌 | 代码 | 名称 | 层 | 信号 | 现价 | RSI | 量比 | RR | 市值 | 入场 | 止损 | 目标 |")
-        L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        L.append("| 奖牌 | 代码 | 名称 | 数据日 | 层 | 信号 | 现价 | RSI | 量比 | RR | 市值 | 入场 | 止损 | 目标 |")
+        L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         for r in cands:
             conf = "✅放量站MA10" if _confirmed(r) else ("站MA10未放量" if r["close"] >= r["ma10"] else "仅站MA5")
-            L.append(f"| {r['medal']} | {r['code']} | {r['name']} | {r['tier']} | {r['signal']}/{conf} | {r['close']} | "
+            dd = (r.get("data_date", "?") or "?")[5:] + ("⚠️旧" if r.get("is_stale") else "")
+            L.append(f"| {r['medal']} | {r['code']} | {r['name']} | {dd} | {r['tier']} | {r['signal']}/{conf} | {r['close']} | "
                      f"{r['rsi']} | {r['volr']} | {r['rr']} | {r['cap']}亿 | {r['entry']} | {r['stop']} | {r['target']} |")
     L.append("")
 

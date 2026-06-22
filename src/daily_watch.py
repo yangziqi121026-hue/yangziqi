@@ -137,6 +137,7 @@ def _classify(code: str, name: str, tier: str, d: pd.DataFrame) -> dict:
         "dist52": round(dist52, 1), "cap": round(cap) if cap else None, "cap_ok": cap_ok,
         "signal": signal, "category": category,
         "entry": entry, "stop": stop, "target": target, "rr": rr,
+        "data_date": str(r.get("date", ""))[:10],
     }
 
 

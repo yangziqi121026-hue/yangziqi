@@ -229,7 +229,7 @@ def _tech(code: str, name: str, d: pd.DataFrame) -> Dict:
         "low52": round(low52, 2), "high52": round(high52, 2),
         "cap": round(cap) if cap else None, "cap_ok": cap_ok, "above5": above5,
         "signal": signal, "entry": entry, "stop": stop, "target": target, "rr": rr,
-        "recent": recent,
+        "recent": recent, "data_date": str(r.get("date", ""))[:10],
     }
 
 
@@ -259,6 +259,21 @@ def _deepseek(t: Dict, us: Dict, theme: str = "—", fund: str = "—") -> str:
 
 def _fmt(v):
     return f"{v:+.2f}%" if v is not None else "—"
+
+
+def _stale_note(data_date: str) -> str:
+    """比较该票数据日期与今天，滞后则告警——避免拿旧数据当最新。"""
+    from datetime import date, datetime as _dt
+    try:
+        dd = _dt.strptime(data_date, "%Y-%m-%d").date()
+    except Exception:  # noqa: BLE001
+        return "⚠️ 数据日期未知，需核验，勿当最新"
+    gap = (date.today() - dd).days
+    if gap <= 0:
+        return f"✅ 数据截至 {data_date}（当日最新）"
+    if gap <= 3:
+        return f"⚠️ 数据截至 {data_date}，距今 {gap} 天（新浪源该票尚未出更新K线，**非最新**，决策打折/等更新）"
+    return f"🔴 数据截至 {data_date}，距今 {gap} 天，**严重滞后、勿据此交易**，等源更新或换行情终端核实"
 
 
 def analyze(code: str, name: Optional[str] = None, theme: str = "—",
@@ -309,6 +324,10 @@ def analyze(code: str, name: Optional[str] = None, theme: str = "—",
         return report
 
     t = _tech(code, name, d)
+
+    # 数据时效戳（必出，滞后告警）
+    L.append(f"**🕒 数据时效：{_stale_note(t['data_date'])}**")
+    L.append("")
 
     # 一 走势
     L.append(f"{h2} 一、近 7 日走势")
