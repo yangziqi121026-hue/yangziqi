@@ -84,6 +84,27 @@ def _confirmed(r: Dict) -> bool:
     return (r["close"] >= r["ma10"]) and ((r.get("volr") or 0) > 1.3)
 
 
+def _ds_conf_of(r: Dict, env: Dict) -> str:
+    """对单只候选跑 DeepSeek，解析"短线置信度(高/中/低)"。失败返回 '?'。"""
+    import re
+    from . import deepseek_analyst
+    cand = {
+        "code": r["code"], "name": r["name"], "price": r["close"], "rsi": r["rsi"],
+        "macd_state": r.get("macd"), "ma5": r["ma5"], "ma10": r["ma10"],
+        "ma20": r.get("ma20"), "ma60": r.get("ma60"), "dist_52w_low_pct": r.get("dist52"),
+        "chg20": r.get("chg20"), "vol_ratio": r["volr"], "turnover": r.get("turn"),
+        "float_cap_yi": r.get("cap"), "theme": r.get("tier"), "fund_status": "—",
+        "entry_low": str(r["entry"]).split("~")[0], "entry_high": r["entry"],
+        "stop": r["stop"], "target": r["target"], "rr": r["rr"],
+    }
+    try:
+        txt = deepseek_analyst.analyze_one(cand, env)
+    except Exception:  # noqa: BLE001
+        return "?"
+    m = re.search(r"5\)\s*\**\s*(高|中|低)", txt) or re.search(r"(?:置信度|信心)[：:\s\*]*(高|中|低)", txt)
+    return m.group(1) if m else "?"
+
+
 def _eligible(r: Dict) -> bool:
     """是否够格做『明日短线买点候选』。
     ⭐ 回测校准(30万样本)：只有"放量站MA10确认"(放量突破多头/放量站MA10)有正期望(+0.7%/5日)；
@@ -137,12 +158,19 @@ def generate(top_n: int = 3, save: bool = True, wide: bool = True,
     #    (教训：粤电力A 量比2.06"放量站MA10"给🥈，次日-9.98%跌停)。防御只做回踩打底。
     cands = sorted([r for r in rows if _eligible(r) and not r["tier"].startswith("防御")],
                    key=_score, reverse=True)
+    # 🔬 对量价靠前的候选(限前8控成本)逐只 DeepSeek，取置信度——低置信度不发奖牌(教训:鸣志🥉DeepSeek低却排前、次日破止损)
+    ds_env = {"trend": us["tone"], "volume": f"纳指{stock_deepdive._fmt(us['nasdaq'])}/SOX{stock_deepdive._fmt(us['sox'])}",
+              "sentiment": us["tone_note"], "suggested_position": pos_cap}
+    for r in cands[:8]:
+        r["ds_conf"] = _ds_conf_of(r, ds_env)
+    # 发奖牌门槛：放量站MA10确认 + 非滞后数据 + DeepSeek非"低"
     mi = 0
     for r in cands:
-        if _confirmed(r) and mi < 3:
+        blocked = r.get("is_stale") or (r.get("ds_conf") == "低")
+        if _confirmed(r) and not blocked and mi < 3:
             r["medal"] = ["🥇", "🥈", "🥉"][mi]; mi += 1
         else:
-            r["medal"] = "⚠️"
+            r["medal"] = "⚠️" + ("旧" if r.get("is_stale") else "") + ("·DS低" if r.get("ds_conf") == "低" else "")
     defensive = [r for r in rows if r["tier"].startswith("防御")]
     watch = [r for r in rows if (not _eligible(r)) and "破位" not in r["signal"]
              and not r["tier"].startswith("防御")]
@@ -190,20 +218,21 @@ def generate(top_n: int = 3, save: bool = True, wide: bool = True,
     # 一 候选排名
     fail_note = f"｜失败 {len(m['fails'])}" if m["fails"] else ""
     L.append(f"## 一、明日短线候选排名（达标 {len(cands)} 只 / 扫描 {m['scanned']}/{m['total']}{fail_note}）")
-    L.append("> 排序=纯量价；**买点候选只收『放量站MA10确认』**（回测30万样本：仅此类有正期望+0.7%/5日；"
-             "回踩低吸/站MA5未放量期望薄+0.15%已降级到观察池）；防御板块不发奖牌只做回踩打底。")
+    L.append("> 排序=纯量价；**买点候选只收『放量站MA10确认』**（回测30万样本：仅此类有正期望+0.7%/5日；回踩低吸/站MA5未放量期望薄已降级观察）；"
+             "**🥇🥈🥉门槛=确认+非滞后数据+DeepSeek非『低』**（教训:鸣志🥉DeepSeek低却排前、次日破止损-4%）；防御不发奖牌。")
     L.append("> ⚙️ **出场纪律(回测校准·低胜率正偏态)**：胜率约40%属正常，靠『赢家是输家约2倍』取胜——"
              "**第一止盈减半落袋，剩余用移动止损(跌破MA5才清)让赢家跑**捕捉大涨；亏损严守破MA5(-3~4%封顶)。")
     if not cands:
         L.append("**⚠️ 今日无一只满足门槛（站MA5+放量/回踩到位+RR≥1.5+市值合规+非超买）。**")
         L.append("**纪律结论：明日无【主推】，空仓或只做防御。** 宁可错过，不碰不达标的票。")
     else:
-        L.append("| 奖牌 | 代码 | 名称 | 数据日 | 层 | 信号 | 现价 | RSI | 量比 | RR | 市值 | 入场 | 止损 | 目标 |")
-        L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        L.append("| 奖牌 | 代码 | 名称 | 数据日 | DS | 层 | 信号 | 现价 | RSI | 量比 | RR | 市值 | 入场 | 止损 | 目标 |")
+        L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         for r in cands:
             conf = "✅放量站MA10" if _confirmed(r) else ("站MA10未放量" if r["close"] >= r["ma10"] else "仅站MA5")
             dd = (r.get("data_date", "?") or "?")[5:] + ("⚠️旧" if r.get("is_stale") else "")
-            L.append(f"| {r['medal']} | {r['code']} | {r['name']} | {dd} | {r['tier']} | {r['signal']}/{conf} | {r['close']} | "
+            ds = r.get("ds_conf", "—")
+            L.append(f"| {r['medal']} | {r['code']} | {r['name']} | {dd} | {ds} | {r['tier']} | {r['signal']}/{conf} | {r['close']} | "
                      f"{r['rsi']} | {r['volr']} | {r['rr']} | {r['cap']}亿 | {r['entry']} | {r['stop']} | {r['target']} |")
     L.append("")
 
