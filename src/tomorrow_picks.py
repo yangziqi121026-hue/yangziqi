@@ -166,13 +166,28 @@ def generate(top_n: int = 3, save: bool = True, wide: bool = True,
     for r in cands[:8]:
         r["ds_conf"] = _ds_conf_of(r, ds_env)
     # 发奖牌门槛：放量站MA10确认 + 非滞后数据 + DeepSeek非"低"
+    #  ① 同板块奖牌去重：同一 tier 最多1块奖牌，避免3只同涨同跌的相关性风险
+    #     (教训 6.23：云赛🥇/首都🥈/润建🥉全押AI算力/服务器，板块回调3只全红 -4~6%)
+    #  ② 弱外围突破降级：env_bad 时整体降一档(跳过🥇、最多🥈🥉)并标"逆风轻仓"
+    #     (教训：自己写了"外围逆风压仓位"，却仍在🟡偏弱盘给突破发🥇🥈)
     mi = 0
+    sector_medaled: set = set()
     for r in cands:
+        sec = r.get("tier", "")
         blocked = r.get("is_stale") or (r.get("ds_conf") == "低")
-        if _confirmed(r) and not blocked and mi < 3:
-            r["medal"] = ["🥇", "🥈", "🥉"][mi]; mi += 1
+        dup_sector = sec in sector_medaled
+        if _confirmed(r) and not blocked and not dup_sector and mi < 3:
+            rank = mi + (1 if env_bad else 0)  # 弱外围降一档
+            if rank <= 2:
+                r["medal"] = ["🥇", "🥈", "🥉"][rank] + ("·逆风轻仓" if env_bad else "")
+                sector_medaled.add(sec); mi += 1
+            else:
+                r["medal"] = "⚠️·弱市降级"
         else:
-            r["medal"] = "⚠️" + ("旧" if r.get("is_stale") else "") + ("·DS低" if r.get("ds_conf") == "低" else "")
+            tag = ("旧" if r.get("is_stale") else "") + ("·DS低" if r.get("ds_conf") == "低" else "")
+            if dup_sector and _confirmed(r) and not blocked:
+                tag += "·同板块已选"
+            r["medal"] = "⚠️" + tag
     defensive = [r for r in rows if r["tier"].startswith("防御")]
     watch = [r for r in rows if (not _eligible(r)) and "破位" not in r["signal"]
              and not r["tier"].startswith("防御")]

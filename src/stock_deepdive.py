@@ -134,6 +134,15 @@ def _sina(c: str) -> str:
 
 
 def _fetch(code: str, retries: int = 3):
+    # 优先直连东财（当日最新+资金面）；限流/失败再回退新浪（可能滞后但稳）。
+    try:
+        from . import em_fetch
+
+        d = em_fetch.daily(code)
+        if d is not None and len(d) >= 60:
+            return d
+    except Exception:  # noqa: BLE001
+        pass
     for _ in range(retries):
         try:
             import akshare as ak
@@ -220,7 +229,15 @@ def _tech(code: str, name: str, d: pd.DataFrame) -> Dict:
     # 仅在「站上MA5、可在现价附近进场」时 RR 才有意义；破位/跌破MA5 时按现价算 RR 是误导
     rr = round((target - close) / risk, 2) if (above5 and risk > 0) else None
 
+    main_net = None  # 主力资金净额(元)，直连东财，取不到则维持降权
+    try:
+        from . import em_fetch
+
+        main_net = em_fetch.main_net_latest(code)
+    except Exception:  # noqa: BLE001
+        pass
     return {
+        "main_net": main_net,
         "code": code, "name": name, "close": round(close, 2), "rsi": round(rsi, 1),
         "macd": macd, "macd_hist": round(h1, 4), "ma5": round(ma5, 2), "ma10": round(ma10, 2),
         "ma20": round(ma20, 2), "ma60": round(ma60, 2), "volr": round(volr, 2),
@@ -370,7 +387,12 @@ def analyze(code: str, name: Optional[str] = None, theme: str = "—",
     L.append(f"| 外围 | {us['tone']}（纳指{_fmt(us['nasdaq'])}/SOX{_fmt(us['sox'])}）{'❌逆风' if env_bad else '—'} |")
     L.append(f"| 技术 | {t['signal']}、{'空头/跌破均线' if tech_bad else '站均线'}、量比{t['volr']} |")
     L.append(f"| 基本面 | {fund} |")
-    L.append(f"| 资金 | 量比{t['volr']}{'(无承接)' if t['volr'] < 1.0 else ''}（主力/北向取不到,降权） |")
+    if t.get("main_net") is not None:
+        _mn = t["main_net"]
+        _mtxt = f"主力净{'流入' if _mn >= 0 else '流出'}{abs(_mn)/1e4:.0f}万"
+        L.append(f"| 资金 | 量比{t['volr']}{'(无承接)' if t['volr'] < 1.0 else ''}｜{_mtxt}（东财实时） |")
+    else:
+        L.append(f"| 资金 | 量比{t['volr']}{'(无承接)' if t['volr'] < 1.0 else ''}（主力/北向取不到,降权） |")
     L.append("")
     # 操作建议
     if t["rsi"] <= 30:

@@ -54,6 +54,15 @@ def _sina(c: str) -> str:
 
 
 def _fetch(code: str, retries: int = 2):
+    # 优先直连东财（当日最新）；限流/失败回退新浪。
+    try:
+        from . import em_fetch
+
+        d = em_fetch.daily(code)
+        if d is not None and len(d) >= 60:
+            return d
+    except Exception:  # noqa: BLE001
+        pass
     for _ in range(retries):
         try:
             import akshare as ak
