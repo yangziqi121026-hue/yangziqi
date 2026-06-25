@@ -10,11 +10,38 @@ Tier B/C（需年报PDF or 联网检索，半自动）：
 """
 from __future__ import annotations
 
+import re
 from typing import Dict, List, Optional
 
 from .. import em_f10
 
 _MAINOP = "RPT_F10_FN_MAINOP"
+
+# 题材 → 主营项目名里可能的同义/相关词（解决"景嘉微叫图形显控、鸣志叫控制电机"的字面漏判）
+THEME_SYNONYMS: Dict[str, List[str]] = {
+    "算力": ["算力", "IDC", "数据中心", "云计算", "云服务", "服务器", "智算", "互联网数据"],
+    "GPU": ["GPU", "图形", "显控", "图形处理", "图形显控", "图形显示"],
+    "机器人": ["机器人", "数控", "运动控制", "控制电机", "步进", "伺服", "空心杯", "谐波", "丝杠", "电机"],
+    "HBM": ["HBM", "存储", "内存", "DRAM", "封装", "先进封装"],
+    "存储": ["存储", "内存", "DRAM", "NAND", "闪存", "模组"],
+    "信创": ["信创", "国产", "自主可控", "操作系统", "数据库", "软件", "信息技术"],
+    "半导体": ["半导体", "芯片", "集成电路", "晶圆", "封测", "IC"],
+    "光模块": ["光模块", "光器件", "光通信", "CPO", "光电"],
+    "液冷": ["液冷", "温控", "散热", "冷却", "氟化液", "浸没"],
+    "制冷剂": ["制冷剂", "氟化工", "氟化", "含氟"],
+    "稀土": ["稀土", "磁材", "永磁", "镨钕"],
+    "光伏": ["光伏", "电池片", "组件", "硅片", "逆变"],
+    "锂电": ["锂电", "锂", "电池", "正极", "负极", "电解液", "隔膜"],
+}
+
+
+def expand_keywords(theme: str) -> List[str]:
+    """把题材扩成一组同义关键词，提升与主营项目名的匹配率。"""
+    kws = set(t for t in re.split(r"[/、,，\s]+", theme) if t)
+    for key, syns in THEME_SYNONYMS.items():
+        if key in theme or key in kws:
+            kws.update(syns)
+    return list(kws)
 
 
 def _f(v):
@@ -75,7 +102,7 @@ def verify_theme_benefit(code: str, theme: str,
     返回 {benefit:真/部分/伪/未实锤, hit_items:[...], confidence:强/中/弱, evidence:[...]}。
     """
     comp = main_composition(code)
-    kws = [k for k in theme.replace("/", " ").replace("、", " ").split() if k]
+    kws = expand_keywords(theme)
     hits = []
     for item in comp:
         nm = str(item["项目"])

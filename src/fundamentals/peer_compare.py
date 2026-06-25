@@ -84,17 +84,19 @@ def compare(code: str, top: int = 6, with_kline: bool = True) -> pd.DataFrame:
     board, date = v["BOARD_CODE"], v["交易日"]
     rows = em_f10.query(_VAL, f'(BOARD_CODE="{board}")(TRADE_DATE=\'{date}\')',
                         page_size=80, sort_col="TOTAL_MARKET_CAP")
-    # 取流通市值前 top，并确保目标在内
-    picked, seen = [], set()
+    # 目标股优先并入（小市值目标常排在行业 80 名外、不在 board 返回里→显式补拉）
+    target_row = next((r for r in rows if str(r.get("SECURITY_CODE")) == str(code)), None)
+    if target_row is None:
+        tr_raw = em_f10.report(_VAL, code, page_size=1, sort_col="TRADE_DATE")
+        target_row = tr_raw[0] if tr_raw else None
+    picked = [target_row] if target_row else []
+    seen = {str(code)} if target_row else set()
     for r in rows:
-        c = r.get("SECURITY_CODE")
+        c = str(r.get("SECURITY_CODE"))
         if c and c not in seen:
             picked.append(r); seen.add(c)
         if len(picked) >= top:
             break
-    if code not in seen:
-        tgt = [r for r in rows if r.get("SECURITY_CODE") == code]
-        picked += tgt
     out = []
     for r in picked:
         c = r.get("SECURITY_CODE")

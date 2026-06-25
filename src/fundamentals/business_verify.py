@@ -33,7 +33,7 @@ def verify(code: str, claim: str, name: str = "",
     extra_evidence: 联网检索/互动易抓到的关键句（弱证据）
     返回 {level, anchor, evidence:[{src,level,text}], note}
     """
-    kws = [k for k in claim.replace("/", " ").replace("、", " ").split() if k]
+    kws = arp.expand_keywords(claim)
     evidence: List[Dict] = []
 
     # 1) 主营构成（硬证据）
