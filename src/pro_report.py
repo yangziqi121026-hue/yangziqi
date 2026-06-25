@@ -28,6 +28,7 @@ from .fundamentals import holder_change_tracker as hct
 from .fundamentals import peer_compare as pc
 from .fundamentals import event_calendar as ec
 from .fundamentals import annual_report_parser as arp
+from .fundamentals import industry_price_monitor as ipm
 
 
 def _decision(tech: Dict, fund_tier: Optional[str], ds_conf: Optional[str]) -> str:
@@ -156,8 +157,12 @@ def pro_card(code: str, name: str = "", ds: bool = False, top: int = 5,
         peer_row = "无同行数据"
     # 股东
     holder_row = f"{holder['score']}/100 {holder['tier']}（{'；'.join(holder['notes']) or '无异动'}）" if holder else "无数据"
-    # 产业价格（P5）
-    price_row = "待P5接入（DRAM/铜/稀土/制冷剂等行业价格周期）"
+    # 产业价格（⑤ 关联商品周期）
+    ind = ipm.industry_score(code, name)
+    if ind and ind.get("note"):
+        price_row = ind["note"] + (f"（景气分{ind['score']}/10）" if ind.get("score") is not None else "")
+    else:
+        price_row = "无关联大宗商品（纯技术/服务股，不适用）"
     # 事件
     ev = events.get("未来事件", [])
     ev_row = ("；".join(f"{e['日期']}{e['类别']}" for e in ev) if ev else "未来7天无个股重大事件")

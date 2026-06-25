@@ -14,6 +14,7 @@ from . import financial_quarter_tracker as fqt
 from . import holder_change_tracker as hct
 from . import peer_compare as pc
 from . import annual_report_parser as arp
+from . import industry_price_monitor as ipm
 
 # 各维度满分（设计权重，未就绪的维度暂不计入归一）
 _WEIGHTS = {
@@ -129,8 +130,14 @@ def total_score(code: str, name: str = "", theme: Optional[str] = None) -> Dict:
     op = _orders_dim(code, theme, _WEIGHTS["订单产能"])
     dims["订单产能"] = op if op else (None, _WEIGHTS["订单产能"], "无主营构成数据")
 
-    # —— 未就绪维度（P5 接入）——
-    dims["行业景气"] = (None, _WEIGHTS["行业景气"], "待接入(P5行业价格)")
+    # —— 行业景气维度（⑤ 关联商品价格周期）——
+    ind = ipm.industry_score(code, name, _WEIGHTS["行业景气"])
+    if ind and ind.get("score") is not None:
+        dims["行业景气"] = (ind["score"], _WEIGHTS["行业景气"], ind["note"])
+    elif ind:
+        dims["行业景气"] = (None, _WEIGHTS["行业景气"], ind["note"])
+    else:
+        dims["行业景气"] = (None, _WEIGHTS["行业景气"], "无关联商品(纯技术/服务股,不适用)")
 
     ready = {k: v for k, v in dims.items() if v[0] is not None}
     if not ready:
@@ -147,7 +154,7 @@ def report_md(code: str, name: str = "", theme: Optional[str] = None) -> str:
     if r["score"] is None:
         return f"### 🧮 {name} {code} 综合基本面\n> {r['tier']}"
     lines = [f"### 🧮 {name} {code} 综合基本面评分：{r['score']}/100 → **{r['tier']}**",
-             f"_（{r['note']}；其余维度随P2-P5接入）_", "",
+             f"_（{r['note']}；None=该维不适用或需联网检索）_", "",
              "| 维度 | 得分 | 说明 |", "|---|---|---|"]
     for k, (pts, mx, note) in r["dims"].items():
         pts_s = "—(待接入)" if pts is None else f"{pts}/{mx}"
