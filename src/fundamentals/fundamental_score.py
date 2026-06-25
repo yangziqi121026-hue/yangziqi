@@ -13,6 +13,7 @@ from typing import Dict, Optional
 from . import financial_quarter_tracker as fqt
 from . import holder_change_tracker as hct
 from . import peer_compare as pc
+from . import annual_report_parser as arp
 
 # 各维度满分（设计权重，未就绪的维度暂不计入归一）
 _WEIGHTS = {
@@ -49,6 +50,30 @@ def _valuation_dim(v: Dict, full: float):
     else:
         peg_s = 0.5
     return round((pe_s * 0.6 + peg_s * 0.4) * full, 1), full, f"{tag}·PEG{peg if peg is None else round(peg,1)}"
+
+
+def _orders_dim(code: str, theme: Optional[str], full: float):
+    """订单产能维度：主营质量(主力业务毛利率水平) + 题材受益强度(若给theme)。"""
+    comp = arp.main_composition(code)
+    if not comp:
+        return None
+    dom = comp[0]
+    gm = dom.get("毛利率%") or 0
+    if gm >= 40:
+        q, tag = 1.0, f"主力[{dom['项目']}]毛利{gm:.0f}%高壁垒"
+    elif gm >= 25:
+        q, tag = 0.7, f"主力[{dom['项目']}]毛利{gm:.0f}%中等"
+    elif gm >= 15:
+        q, tag = 0.5, f"主力[{dom['项目']}]毛利{gm:.0f}%偏低"
+    else:
+        q, tag = 0.3, f"主力[{dom['项目']}]毛利{gm:.0f}%薄"
+    if theme:
+        tb = arp.verify_theme_benefit(code, theme)
+        bmap = {"真受益": 1.0, "部分受益": 0.7, "沾边受益": 0.4,
+                "存疑(仅消息面)": 0.3, "未实锤": 0.2}
+        q = q * 0.5 + bmap.get(tb["benefit"], 0.5) * 0.5
+        tag += f"；题材[{theme}]{tb['benefit']}"
+    return round(q * full, 1), full, tag
 
 
 def _tier(score100: float) -> str:
@@ -100,9 +125,12 @@ def total_score(code: str, name: str = "", theme: Optional[str] = None) -> Dict:
     except Exception:  # noqa: BLE001
         dims["股东变化"] = (None, _WEIGHTS["股东变化"], "取数失败")
 
-    # —— 未就绪维度（P4-P5 接入）——
-    for k in ("行业景气", "订单产能"):
-        dims[k] = (None, _WEIGHTS[k], "待接入")
+    # —— 订单产能维度（② 主营质量 + 题材受益）——
+    op = _orders_dim(code, theme, _WEIGHTS["订单产能"])
+    dims["订单产能"] = op if op else (None, _WEIGHTS["订单产能"], "无主营构成数据")
+
+    # —— 未就绪维度（P5 接入）——
+    dims["行业景气"] = (None, _WEIGHTS["行业景气"], "待接入(P5行业价格)")
 
     ready = {k: v for k, v in dims.items() if v[0] is not None}
     if not ready:

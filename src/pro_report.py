@@ -27,6 +27,7 @@ from .fundamentals import fundamental_score as fs
 from .fundamentals import holder_change_tracker as hct
 from .fundamentals import peer_compare as pc
 from .fundamentals import event_calendar as ec
+from .fundamentals import annual_report_parser as arp
 
 
 def _decision(tech: Dict, fund_tier: Optional[str], ds_conf: Optional[str]) -> str:
@@ -83,8 +84,12 @@ def _risk_flags(tech, fin, val, holder, events) -> str:
     return "；".join(flags) if flags else "无重大硬伤（仍守破MA5止损）"
 
 
-def pro_card(code: str, name: str = "", ds: bool = False, top: int = 5) -> str:
-    """生成专业版固定 10 行表（含外围/第一止盈/数据时效）。"""
+def pro_card(code: str, name: str = "", ds: bool = False, top: int = 5,
+             theme: Optional[str] = None) -> str:
+    """生成专业版固定 10 行表（含外围/第一止盈/数据时效）。
+
+    theme: 若给定题材（如"算力"/"HBM"），题材行与订单产能维度按业务验证(②⑥)落地判断。
+    """
     # 技术 + K线
     d = sd._fetch(code)
     if d is None:
@@ -105,7 +110,7 @@ def pro_card(code: str, name: str = "", ds: bool = False, top: int = 5) -> str:
     rank = pc.rank_value(comp) if not comp.empty else comp
     holder = hct.summarize(code, name)
     events = ec.upcoming(code, name, days=7)
-    fund = fs.total_score(code, name)
+    fund = fs.total_score(code, name, theme=theme)
     # DeepSeek 置信（可选）
     ds_conf = None
     if ds:
@@ -119,8 +124,13 @@ def pro_card(code: str, name: str = "", ds: bool = False, top: int = 5) -> str:
             ds_conf = None
 
     # —— 各行结论 ——
-    # 题材（体系待接题材雷达）
-    theme_row = f"{val.get('行业','—')}（体系/强度待接题材雷达；外围{env['tone']}）"
+    # 题材（给定theme则做业务验证，否则显示行业）
+    if theme:
+        tb = arp.verify_theme_benefit(code, theme)
+        theme_row = (f"「{theme}」{tb['benefit']}(置信{tb['confidence']})——{tb['note']}"
+                     f"｜行业{val.get('行业','—')}｜外围{env['tone']}")
+    else:
+        theme_row = f"{val.get('行业','—')}（未指定题材；体系/强度待接题材雷达；外围{env['tone']}）"
     # 技术
     tech_row = (f"{tech['signal']}｜现价{tech['close']} MA5={tech['ma5']}/MA10={tech['ma10']} "
                 f"量比{tech['volr']} RSI{tech['rsi']}")
