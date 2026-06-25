@@ -194,6 +194,8 @@ def _tech(code: str, name: str, d: pd.DataFrame) -> Dict:
     volr = float(r["volume"]) / prev5 if prev5 else 0
     turn = float(r["turnover"]) * 100 if "turnover" in d.columns else None
     cap = float(r["outstanding_share"]) * close / 1e8 if "outstanding_share" in d.columns else None
+    if cap is not None and cap != cap:  # 东财限流时流通股本为NaN → 视作取不到
+        cap = None
     cap_ok = cap is not None and 20 <= cap <= 500
     above5 = close >= ma5
     # 近7日
@@ -428,7 +430,8 @@ def analyze(code: str, name: Optional[str] = None, theme: str = "—",
         risks.append(f"流通市值 {t['cap']}亿 超出20-500亿区间")
     if t["rsi"] > 70:
         risks.append("RSI超买，短期回调压力")
-    risks.append("个股主力/北向资金本环境取不到，资金面为降权估计")
+    if t.get("main_net") is None:
+        risks.append("个股主力/北向资金本环境取不到，资金面为降权估计")
     for rk in risks:
         L.append(f"- {rk}")
     L.append("")
@@ -443,7 +446,10 @@ def analyze(code: str, name: Optional[str] = None, theme: str = "—",
     L.append("")
 
     L.append("> 规则：量比>1.3才算放量、站/破MA5、RSI 30/45/70、破MA5硬止损、市值20-500亿(超出降级)。")
-    L.append("> 资金面(主力/北向)未取到、降权；标「需核验」处以实盘为准。本报告仅供研究，不构成投资建议。")
+    if t.get("main_net") is not None:
+        L.append("> 资金面为东财实时主力净额；标「需核验」处以实盘为准。本报告仅供研究，不构成投资建议。")
+    else:
+        L.append("> 资金面(主力/北向)未取到、降权；标「需核验」处以实盘为准。本报告仅供研究，不构成投资建议。")
 
     report = "\n".join(L)
     _save(report, code, name, save)
