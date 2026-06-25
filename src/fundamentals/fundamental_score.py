@@ -11,6 +11,8 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 from . import financial_quarter_tracker as fqt
+from . import holder_change_tracker as hct
+from . import peer_compare as pc
 
 # 各维度满分（设计权重，未就绪的维度暂不计入归一）
 _WEIGHTS = {
@@ -21,6 +23,32 @@ _WEIGHTS = {
     "行业景气": 10,  # P5 industry_price_monitor 接入
     "订单产能": 10,  # P4 business_verify/annual_report_parser 接入
 }
+
+
+def _valuation_dim(v: Dict, full: float):
+    """绝对估值打分：PE_TTM(0.6) + PEG(0.4)。负PE/无盈利给低分。"""
+    if not v or v.get("PE_TTM") is None:
+        return None
+    pe, peg = v.get("PE_TTM"), v.get("PEG")
+    if pe < 0:
+        pe_s, tag = 0.2, f"PE_TTM{pe:.0f}(无盈利)"
+    elif pe < 20:
+        pe_s, tag = 1.0, f"PE{pe:.0f}低估"
+    elif pe < 40:
+        pe_s, tag = 0.7, f"PE{pe:.0f}合理"
+    elif pe < 80:
+        pe_s, tag = 0.4, f"PE{pe:.0f}偏高"
+    else:
+        pe_s, tag = 0.2, f"PE{pe:.0f}高估"
+    if peg is not None and 0 < peg <= 1:
+        peg_s = 1.0
+    elif peg is not None and 1 < peg <= 2:
+        peg_s = 0.6
+    elif peg is not None and peg > 2:
+        peg_s = 0.3
+    else:
+        peg_s = 0.5
+    return round((pe_s * 0.6 + peg_s * 0.4) * full, 1), full, f"{tag}·PEG{peg if peg is None else round(peg,1)}"
 
 
 def _tier(score100: float) -> str:
@@ -58,8 +86,22 @@ def total_score(code: str, name: str = "", theme: Optional[str] = None) -> Dict:
         dims["现金流"] = (round(cf_pts / cf_mx * _WEIGHTS["现金流"], 1),
                         _WEIGHTS["现金流"], bd["现金流改善"][1])
 
-    # —— 未就绪维度（P2-P5 接入）——
-    for k in ("估值", "股东变化", "行业景气", "订单产能"):
+    # —— 估值维度（③ peer_compare.valuation 绝对估值打分）——
+    v = pc.valuation(code)
+    vp = _valuation_dim(v, _WEIGHTS["估值"])
+    dims["估值"] = vp if vp else (None, _WEIGHTS["估值"], "无估值数据")
+
+    # —— 股东变化维度（④ holder_change_tracker.summarize）——
+    try:
+        hd = hct.summarize(code, name)
+        dims["股东变化"] = (round(hd["score"] / 100 * _WEIGHTS["股东变化"], 1),
+                          _WEIGHTS["股东变化"],
+                          f"{hd['tier']}·{('；'.join(hd['notes']) or '无异动')}")
+    except Exception:  # noqa: BLE001
+        dims["股东变化"] = (None, _WEIGHTS["股东变化"], "取数失败")
+
+    # —— 未就绪维度（P4-P5 接入）——
+    for k in ("行业景气", "订单产能"):
         dims[k] = (None, _WEIGHTS[k], "待接入")
 
     ready = {k: v for k, v in dims.items() if v[0] is not None}

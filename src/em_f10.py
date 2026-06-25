@@ -73,6 +73,35 @@ def report(
     return []
 
 
+def query(
+    report_name: str,
+    raw_filter: str,
+    page_size: int = 50,
+    page: int = 1,
+    sort_col: str = "REPORT_DATE",
+    desc: bool = True,
+    columns: str = "ALL",
+    retries: int = 3,
+) -> List[Dict]:
+    """通用 reportName 取数（原始 filter，不自动加 SECUCODE）。用于按行业/板块等条件查询。"""
+    params = {
+        "reportName": report_name, "columns": columns, "filter": raw_filter,
+        "pageNumber": str(page), "pageSize": str(page_size),
+        "sortColumns": sort_col, "sortTypes": "-1" if desc else "1",
+        "source": "HSF10", "client": "PC",
+    }
+    for _ in range(retries):
+        try:
+            r = requests.get(_URL, params=params, headers=_H, timeout=20)
+            data = (r.json().get("result") or {}).get("data")
+            if data is not None:
+                return data
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(0.6)
+    return []
+
+
 def first(rows: List[Dict]) -> Optional[Dict]:
     return rows[0] if rows else None
 
